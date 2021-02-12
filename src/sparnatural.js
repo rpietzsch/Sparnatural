@@ -25,7 +25,7 @@ const i18nLabels = {
 	"fr": require('./assets/lang/fr.json')
 };
 
-SimpleJsonLdSpecificationProvider = require("./SpecificationProviders.js").SimpleJsonLdSpecificationProvider;
+JsonLdSpecificationProvider = require("./JsonLdSpecificationProvider.js").JsonLdSpecificationProvider;
 SpecificationProviderFactory = require("./SpecificationProviderFactory.js").SpecificationProviderFactory;
 RDFSpecificationProvider = require("./RDFSpecificationProvider.js").RDFSpecificationProvider ;
 SparqlBifContainsAutocompleteAndListHandler = require("./AutocompleteAndListHandlers.js").SparqlBifContainsAutocompleteAndListHandler;
@@ -35,11 +35,15 @@ PropertyBasedAutocompleteAndListHandler = require("./AutocompleteAndListHandlers
 WikidataAutocompleteAndListHandler = require("./AutocompleteAndListHandlers.js").WikidataAutocompleteAndListHandler;
 UriOnlyListHandler = require("./AutocompleteAndListHandlers.js").UriOnlyListHandler;
 GraphDbLuceneConnectorSparqlAutocompleteAndListHandler = require("./AutocompleteAndListHandlers.js").GraphDbLuceneConnectorSparqlAutocompleteAndListHandler;
+SparqlTemplateListHandler = require("./AutocompleteAndListHandlers.js").SparqlTemplateListHandler;
+SparqlTemplateAutocompleteHandler = require("./AutocompleteAndListHandlers.js").SparqlTemplateAutocompleteHandler;
 
 DefaultQueryGenerator = require("./QueryGenerators.js").DefaultQueryGenerator;
 
 require("./Widgets.js");
+
 var Config = require("./SparnaturalConfig.js");
+var Datasources = require("./SparnaturalConfigDatasources.js");
 
 (function( $ ) {
 	
@@ -53,13 +57,13 @@ var Config = require("./SparnaturalConfig.js");
 			config: 'config/spec-search.json',
 			language: 'en',
 			addDistinct: false,
-			noTypeCriteriaForObjects: false,
 			typePredicate: "http://www.w3.org/1999/02/22-rdf-syntax-ns#type",
 			maxDepth: 3,
 			maxOr: 3,
 			sendQueryOnFirstClassSelected: false,
 			backgroundBaseColor: '250,136,3',
 			sparqlPrefixes: {},
+			defaultEndpoint: null,
 			
 			autocomplete : {
 				/**
@@ -230,14 +234,14 @@ var Config = require("./SparnaturalConfig.js");
 				var qGenerator = new DefaultQueryGenerator(
 					settings.addDistinct,
 					settings.typePredicate,
-					settings.noTypeCriteriaForObjects,
 					specProvider
 				);
 				qGenerator.setPrefixes(settings.sparqlPrefixes);
 				var queries = qGenerator.generateQuery(event.data.formObject);
 				// fire callback
-				settings.onQueryUpdated(queries.generatedQuery, queries.jsonQuery);
-
+				if(queries != null) {
+					settings.onQueryUpdated(queries.generatedQuery, queries.jsonQuery);
+				}
 			}) ;
 		}
 
@@ -1229,15 +1233,18 @@ var Config = require("./SparnaturalConfig.js");
 			}
 
 			// determine widget type
-			this.widgetType = this.specProvider.getObjectPropertyType(this.ParentComponent.ParentComponent.ObjectPropertyGroup.value_selected);
+			var objectPropertyId = this.ParentComponent.ParentComponent.ObjectPropertyGroup.value_selected;
+			this.widgetType = this.specProvider.getObjectPropertyType(objectPropertyId);
+
 			// if non selectable, simply exit
 			if (this.widgetType == Config.NON_SELECTABLE_PROPERTY) {
 				return true;
 			}
 
 			// determine label and bit of HTML to select value
-			var classLabel = specProvider.getLabel(this.ParentComponent.ParentComponent.EndClassGroup.value_selected) ;
-			if (this.widgetType == Config.SEARCH_PROPERTY) {
+			var rangeClassId = this.ParentComponent.ParentComponent.EndClassGroup.value_selected
+			var classLabel = specProvider.getLabel(rangeClassId) ;
+			if (this.widgetType == Config.SEARCH_PROPERTY || this.widgetType == Config.GRAPHDB_SEARCH_PROPERTY) {
 				// label of the "Search" pseudo-class is inserted alone in this case
 				var endLabel = classLabel;
 			} else {
@@ -1246,7 +1253,11 @@ var Config = require("./SparnaturalConfig.js");
 			var widgetLabel = '<span class="edit-trait first"><span class="edit-trait-top"></span><span class="edit-num">1</span></span>'+ endLabel ;
 			
 			// init HTML by concatenating bit of HTML + widget HTML
-			this.createWidgetComponentFromWidgetType() ;
+			this.createWidgetComponent(
+				this.widgetType,
+				objectPropertyId,
+				rangeClassId
+			) ;
 			this.widgetHtml = widgetLabel + this.widgetComponent.html ;
 		
 			this.cssClasses.IsOnEdit = true ;
@@ -1267,38 +1278,137 @@ var Config = require("./SparnaturalConfig.js");
 			this.init(true);
 		}
 
-		this.createWidgetComponentFromWidgetType = function createWidgetComponentFromWidgetType() {
-			switch (this.widgetType) {
+		this.createWidgetComponent = function createWidgetComponent(widgetType, objectPropertyId, rangeClassId) {
+			switch (widgetType) {
 			  case Config.LIST_PROPERTY:
-				this.widgetComponent = new ListWidget(this, this.settings.list) ;
+			    var handler = this.settings.list;
+			    // to be passed in anonymous functions
+			    var theSpecProvider = this.specProvider;
+
+			    // determine custom datasource
+			    var datasource = this.specProvider.getDatasource(objectPropertyId);
+
+			    if(datasource == null) {
+			    	// try to read it on the class
+			    	datasource = this.specProvider.getDatasource(rangeClassId);
+			    }
+
+			    if(datasource == null) {
+			    	// datasource still null
+			    	// if a default endpoint was provided, provide default datasource
+			    	if(this.settings.defaultEndpoint != null) {
+				    	datasource = Datasources.DATASOURCES_CONFIG.get(Datasources.LIST_URI_COUNT);
+				    }
+			    }
+
+				if(datasource != null) {
+			    	// if we have a datasource, possibly the default one, provide a config based
+			    	// on a SparqlTemplate, otherwise use the handler provided
+				    handler = new SparqlTemplateListHandler(
+			    		// endpoint URL
+			    		(datasource.sparqlEndpointUrl != null)?datasource.sparqlEndpointUrl:this.settings.defaultEndpoint,
+			    		
+			    		// sparqlPostProcessor
+			    		{
+				            semanticPostProcess : function(sparql) {
+				            	// also add prefixes
+				                for (key in settings.sparqlPrefixes) {
+							        sparql = sparql.replace("SELECT ", "PREFIX "+key+": <"+settings.sparqlPrefixes[key]+"> \nSELECT ");
+						    	}
+				                return theSpecProvider.expandSparql(sparql);
+				            }
+				        },
+
+			    		// language,
+			    		this.settings.language,
+
+			    		// labelPath
+			    		(datasource.labelPath != null)?datasource.labelPath:((datasource.labelProperty != null)?"<"+datasource.labelProperty+">":null),
+
+			    		// sparql query
+			    		(datasource.queryString != null)?datasource.queryString:datasource.queryTemplate
+			    	);
+				}
+
+				this.widgetComponent = new ListWidget(this, handler) ;
 				this.cssClasses.ListeWidget = true ;
 				break;
 			  case Config.AUTOCOMPLETE_PROPERTY:
-				this.widgetComponent = new AutoCompleteWidget(this, this.settings.autocomplete) ;
+			    var handler = this.settings.autocomplete;
+			    // to be passed in anonymous functions
+			    var theSpecProvider = this.specProvider;
+
+			    // determine custom datasource
+			    var datasource = this.specProvider.getDatasource(objectPropertyId);
+
+			    if(datasource == null) {
+			    	// try to read it on the class
+			    	datasource = this.specProvider.getDatasource(rangeClassId);
+			    }
+
+			    if(datasource == null) {
+			    	// datasource still null
+			    	// if a default endpoint was provided, provide default datasource
+			    	if(this.settings.defaultEndpoint != null) {
+				    	datasource = Datasources.DATASOURCES_CONFIG.get(Datasources.SEARCH_URI_CONTAINS);
+				    }
+			    }
+
+			    if(datasource != null) {
+			    	// if we have a datasource, possibly the default one, provide a config based
+			    	// on a SparqlTemplate, otherwise use the handler provided
+				    handler = new SparqlTemplateAutocompleteHandler(
+			    		// endpoint URL
+			    		(datasource.sparqlEndpointUrl != null)?datasource.sparqlEndpointUrl:this.settings.defaultEndpoint,
+			    		
+			    		// sparqlPostProcessor
+			    		{
+				            semanticPostProcess : function(sparql) {
+				            	// also add prefixes
+				                for (key in settings.sparqlPrefixes) {
+							        sparql = sparql.replace("SELECT ", "PREFIX "+key+": <"+settings.sparqlPrefixes[key]+"> \nSELECT ");
+						    	}
+				                return theSpecProvider.expandSparql(sparql);
+				            }
+				        },
+
+			    		// language,
+			    		this.settings.language,
+
+			    		// labelPath
+			    		(datasource.labelPath != null)?datasource.labelPath:((datasource.labelProperty != null)?"<"+datasource.labelProperty+">":null),
+
+			    		// sparql query
+			    		(datasource.queryString != null)?datasource.queryString:datasource.queryTemplate
+			    	);
+				}
+
+				this.widgetComponent = new AutoCompleteWidget(this, handler) ;
 				this.cssClasses.AutocompleteWidget = true ;
 			    break;
-			  case Config.TIME_PERIOD_PROPERTY:
-				this.widgetComponent = new DatesWidget(this, this.settings.dates, langSearch) ;
-				this.cssClasses.DatesWidget  = true ;
-				break;
+			  case Config.GRAPHDB_SEARCH_PROPERTY:
 			  case Config.SEARCH_PROPERTY:
 				this.widgetComponent = new SearchWidget(this, langSearch) ;
 				this.cssClasses.SearchWidget  = true ;
 				break;
-			  case Config.TIME_DATE_PICKER_PROPERTY:
+			  case Config.TIME_PROPERTY_YEAR:
 				this.widgetComponent = new TimeDatePickerWidget(this, this.settings.dates, false, langSearch) ;
 				this.cssClasses.TimeDatePickerWidget  = true ;
 				break;
-			  case Config.TIME_DATE_DAY_PICKER_PROPERTY:
+			  case Config.TIME_PROPERTY_DATE:
 				this.widgetComponent = new TimeDatePickerWidget(this, this.settings.dates, 'day', langSearch) ;
 				this.cssClasses.TimeDatePickerWidget  = true ;
+				break;
+			  case Config.TIME_PROPERTY_PERIOD:
+				this.widgetComponent = new DatesWidget(this, this.settings.dates, langSearch) ;
+				this.cssClasses.DatesWidget  = true ;
 				break;
 			  case Config.NON_SELECTABLE_PROPERTY:
 			  	this.widgetComponent = new NoWidget(this) ;
 			  	this.cssClasses.NoWidget = true ;
 			  default:
 			  	// TODO : throw Exception
-			  	console.log("Unexpected Widget Type "+this.widgetType)
+			  	console.log("Unexpected Widget Type "+widgetType)
 			}
 		};
 		

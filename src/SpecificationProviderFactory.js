@@ -6,7 +6,7 @@ export class SpecificationProviderFactory {
 	build(config, language, callback) {
 		if(typeof(config) == "object") {
 			// if the config is a JSON object in the page, read it directly
-			callback(new SimpleJsonLdSpecificationProvider(config, language));
+			callback(new JsonLdSpecificationProvider(config, language));
 		} else if(config.includes("@prefix") || config.includes("<http")) {
 			// inline Turtle
 			RDFSpecificationProvider.build(config, language).then(function(provider) {
@@ -18,16 +18,17 @@ export class SpecificationProviderFactory {
 				// otherwise interpret it as a URL, load id and parse the result
 				$.when(
 					$.getJSON( config, function( data ) {
-						callback(new SimpleJsonLdSpecificationProvider(data, language));
+						callback(new JsonLdSpecificationProvider(data, language));
 					}).fail(function(response) {
-						console.log("Sparnatural - unable to load config file : " +config);
+						console.log("Sparnatural - unable to load JSON config file : " +config);
 						console.log(response);
 					})
 				).done(function() {});
 			} else if(config.includes("ttl")) {
 				$.ajax({
 				  method: "GET",
-				  url: config
+				  url: config,
+				  dataType: "text"
 				})
 				.done( function( configData ) {
 					RDFSpecificationProvider.build(configData, language).then(function(provider) {
@@ -36,7 +37,7 @@ export class SpecificationProviderFactory {
 					});
 				})
 				.fail(function(response) {
-						console.log("Sparnatural - unable to load config file : " +config);
+						console.log("Sparnatural - unable to load RDF config file : " +config);
 						console.log(response);
 				});
 			} else {

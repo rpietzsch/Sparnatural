@@ -14,8 +14,7 @@ To get started :
 
 1. Read the following documentation;
 2. Look at how things work in file `sparnatural-demo-dbpedia/index.html`; 
-   1. **Attention** : make sure you open this open through a web server, e.g. http://localhost/sparnatural-demo-dbpedia/index.html, and *not* by opening the file directly in your browser (`file://...`), otherwise the loading of component specification fails and your will get a blank page;
-3. Look at how the specifications are written by looking at the source of `sparnatural-demo-dbpedia/index.html`
+3. In particular look at how the specifications are written by looking at [the source of `sparnatural-demo-dbpedia/index.html`](https://github.com/sparna-git/Sparnatural/blob/master/sparnatural-demo-dbpedia/index.html#L100)
 4. Adapt `sparnatural-demo-dbpedia/index.html` by changing the configuration and adapting the SPARQL endpoint URL;
 
 # Features
@@ -32,7 +31,7 @@ Select the type of entity to search...
 
 ![](documentation/2-screenshot-object-type-selection.png)
 
-In this case there is only one possible type of relation between the two "_studied by_", so it gets selected automatically. Then select a value for the related entity, in this case in a dropdown list :
+In this case there is only one possible type of relation that can connect the 2 entities, so it gets selected automatically. Then select a value for the related entity, in this case in a dropdown list :
 
 ![](documentation/3-screenshot-value-selection.png)
 
@@ -68,15 +67,29 @@ Sparnatural offers currently 6 ways of selecting a value for a criteria : autoco
 
 ### Autocomplete field
 
+![](documentation/9-autocomplete.png)
+
 ### Dropdown list
+
+![](documentation/10-list.png)
 
 ### String value (text search)
 
+![](documentation/11-search.png)
+
 ### Date range (year or date precision)
+
+![](documentation/12-time-date.png)
 
 ### Date range with search in period name
 
 ### No value selection
+
+This is useful when a type a of entity is used only to navigate the graph, but without the ability to select an instance of these entities.
+
+![](documentation/13-no-value.png)
+
+
 
 
 ## Multilingual
@@ -104,20 +117,13 @@ The component is configurable using a JSON(-LD) ontology file. Look at the speci
 
 ```json
     {
-      "@id" : "http://www.openarchaeo.fr/explorateur/onto#Site",
+      "@id" : "http://dbpedia.org/ontology/Museum",
       "@type" : "Class",
       "label": [
-        {
-          "@value" : "Site",
-          "@language" : "en"
-        },
-        {
-          "@value" : "Site",
-          "@language" : "fr"
-        }
+        {"@value" : "Museum", "@language" : "en"},
+        {"@value" : "Musée","@language" : "fr"}
       ],
-	  "iconPath":  "assets/icons/noir/site.png",
-	  "highlightedIconPath":  "assets/icons/blanc/site.png"
+      "faIcon":  "fas fa-university"
     },
 ```
 
@@ -125,32 +131,16 @@ The component is configurable using a JSON(-LD) ontology file. Look at the speci
 
 ```json
     {
-      "@id" : "http://www.openarchaeo.fr/explorateur/onto#trouve_dans",
-      "@type" : [
-        "ObjectProperty",
-        "AutocompleteProperty"
-      ],
+      "@id" : "http://dbpedia.org/ontology/museum",
+      "@type" : "ObjectProperty",
+      "subPropertyOf" : "sparnatural:AutocompleteProperty",
       "label": [
-        {
-          "@value" : "found in",
-          "@language" : "en"
-        },
-        {
-          "@value" : "trouvé dans",
-          "@language" : "fr"
-        }
+        {"@value" : "displayed at","@language" : "en"},
+        {"@value" : "exposée à","@language" : "fr"}
       ],
-      "domain": "http://www.openarchaeo.fr/explorateur/onto#Mobilier",
-      "range": {
-        "@type" : "Class",
-        "unionOf" : {
-          "@list" : [ 
-            { "@id" : "http://www.openarchaeo.fr/explorateur/onto#Site"},
-            { "@id" : "http://www.openarchaeo.fr/explorateur/onto#US"},
-            { "@id" : "http://www.openarchaeo.fr/explorateur/onto#Sepulture"}
-          ]
-        }
-      }
+      "domain": "http://dbpedia.org/ontology/Artwork",
+      "range": "http://dbpedia.org/ontology/Museum",
+      "datasource" : "datasources:search_rdfslabel_bifcontains"
     },
 ```
 
@@ -169,22 +159,19 @@ Have a look at `index.html` in the demos folder to see how the component is inte
 
 ## Map the query structure to a different graph structure
 
-_to be written_
-
-Do something like this :
+Map classes or properties in the config to a corresponding SPARQL property path or a corresponding class URI, using the `sparqlString` JSON key, e.g. :
 
 ```
-      var expand = function(sparql, specs) {
-        $.each( specs['@graph'], function( key, val ) {
-          if ( val['@type'] == 'ObjectProperty' || val['@type'] == 'Class') {
-            if ( val['path'] != null) {
-                var re = new RegExp("<" + val['@id'] + ">","g");
-                sparql = sparql.replace(re, val['path']);
-            }
-          }
-        }) ;
-        return sparql ;
-      }
+    {
+      "@id" : "http://labs.sparna.fr/sparnatural-demo-dbpedia/onto#bornIn",
+      "@type" : "ObjectProperty",
+      ...
+      "sparqlString": "<http://dbpedia.org/ontology/birthPlace>/<http://dbpedia.org/ontology/country>",
+    },
 ```
 
-(this should be included in the code of Sparnatural itself.)
+Then call `expandSparql` on the `sparnatural` instance by passing the original SPARQL query, to replace all mentions of original classes and properties URI with the corresponding SPARQL string :
+
+```
+queryString = sparnatural.expandSparql(queryString);
+```
